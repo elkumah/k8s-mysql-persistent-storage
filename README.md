@@ -1,34 +1,45 @@
-# 🚀 Kubernetes MySQL Deployment with Persistent Storage
+# 🚀 Kubernetes MySQL StatefulSet with Persistent Storage
 
 ## 📌 Project Overview
 
-This project demonstrates how to deploy a **MySQL database on Kubernetes** with **persistent storage** using a PersistentVolumeClaim (PVC).
+This project demonstrates how to deploy a **MySQL database on Kubernetes using a StatefulSet** with persistent storage.
 
-It ensures that database data **survives pod restarts**, which is critical for stateful applications.
+Unlike a basic Pod deployment, this setup ensures:
+
+- **Stable pod identity**
+- **Persistent storage per replica**
+- **Reliable database behavior across restarts**
+
+This is the recommended approach for running **stateful applications** like databases in Kubernetes.
 
 ---
 
 ## 🧠 Key Concepts Covered
 
-- Kubernetes Pods
-- Persistent Volumes (PV) & Persistent Volume Claims (PVC)
-- Secrets for secure credential management
+- Kubernetes StatefulSets
+- PersistentVolumeClaims (PVCs)
+- Dynamic volume provisioning
+- Headless Services
+- Secrets for credential management
 - Volume mounting (`mountPath`)
-- Containerized MySQL deployment
-- Data persistence in Kubernetes
+- Data persistence across pod restarts
 
 ---
 
 ## 🏗️ Architecture
 
 ```
-MySQL Pod
-   ↓
-PersistentVolumeClaim (PVC)
-   ↓
+Client
+  ↓
+Headless Service (mysql)
+  ↓
+StatefulSet (mysql-0)
+  ↓
+PersistentVolumeClaim (mysql-storage-mysql-0)
+  ↓
 PersistentVolume (PV)
-   ↓
-Storage (Disk)
+  ↓
+Disk Storage
 ```
 
 ---
@@ -38,8 +49,8 @@ Storage (Disk)
 ```
 .
 ├── mysql-secret.yaml
-├── mysql-pvc.yaml
-├── mysql-pod.yaml
+├── mysql-service.yaml        # Headless Service
+├── mysql-statefulset.yaml
 └── README.md
 ```
 
@@ -50,32 +61,42 @@ Storage (Disk)
 Stores the MySQL root password securely.
 
 ```bash
-echo -n 'password' | base64
+kubectl create secret generic mysql-secret \
+  --from-literal=MYSQL_ROOT_PASSWORD=YourStrongPassword
 ```
 
-Apply:
-
-```bash
-kubectl apply -f mysql-secret.yaml
-```
+> ⚠️ Note: Secrets are Base64-encoded, not encrypted. Avoid committing real credentials.
 
 ---
 
-## 💾 Step 2: Create PersistentVolumeClaim
+## 🌐 Step 2: Create Headless Service
 
-Requests persistent storage for MySQL data.
+Required for StatefulSet networking.
 
 ```bash
-kubectl apply -f mysql-pvc.yaml
+kubectl apply -f mysql-service.yaml
 ```
+
+This service uses:
+
+```
+clusterIP: None
+```
+
+to provide stable DNS for the StatefulSet.
 
 ---
 
-## 🐬 Step 3: Deploy MySQL Pod
+## 🐬 Step 3: Deploy MySQL StatefulSet
 
 ```bash
-kubectl apply -f mysql-pod.yaml
+kubectl apply -f mysql-statefulset.yaml
 ```
+
+This will:
+
+- Create pod: `mysql-0`
+- Automatically create PVC: `mysql-storage-mysql-0`
 
 ---
 
@@ -86,35 +107,37 @@ kubectl get pods
 kubectl get pvc
 ```
 
-Expected:
+Expected output:
 
-- Pod status: `Running`
-- PVC status: `Bound`
+- Pod: `mysql-0` → `Running`
+- PVC: `mysql-storage-mysql-0` → `Bound`
 
 ---
 
 ## 🔗 Step 5: Connect to MySQL
 
 ```bash
-kubectl exec -it mysql -- bash
+kubectl exec -it mysql-0 -- bash
 mysql -u root -p
 ```
 
 ---
 
-## 🧪 Step 6: Test Persistence
+## 🧪 Step 6: Test Data Persistence
 
 ```sql
 CREATE DATABASE testdb;
 ```
 
-Delete pod:
+Delete the pod:
 
 ```bash
-kubectl delete pod mysql
+kubectl delete pod mysql-0
 ```
 
-Recreate happens automatically. Then verify:
+Kubernetes will recreate it automatically.
+
+Verify:
 
 ```sql
 SHOW DATABASES;
@@ -124,29 +147,77 @@ SHOW DATABASES;
 
 ---
 
+## 🔄 Why StatefulSet Instead of Pod?
+
+| Feature    | Pod          | StatefulSet                |
+| ---------- | ------------ | -------------------------- |
+| Identity   | Ephemeral    | Stable (`mysql-0`)         |
+| Storage    | Manual PVC   | Auto-managed PVC           |
+| Scaling    | Not suitable | Designed for stateful apps |
+| Networking | Basic        | Stable DNS                 |
+
+---
+
 ## ⚠️ Important Notes
 
 - MySQL reads `MYSQL_ROOT_PASSWORD` **only during first initialization**
-- If PVC already contains data, the password will not be updated
-- Use `mountPath: /var/lib/mysql` for proper data persistence
+- If the PVC already contains data, updating the Secret will NOT change the password
+- StatefulSet fields like `volumeClaimTemplates` are **immutable**
+- Deleting the StatefulSet does **not delete PVCs** (data is preserved)
+
+---
+
+## 🛠️ Troubleshooting
+
+### Access denied error
+
+- Ensure you're using the correct password from the Secret
+- If needed, reset by deleting PVC (data loss)
+
+### Lost connection / MySQL crash
+
+- Check logs:
+
+  ```bash
+  kubectl logs mysql-0
+  ```
+
+### PVC stuck in Pending
+
+- Verify StorageClass:
+
+  ```bash
+  kubectl get storageclass
+  ```
+
+---
+
+## 🚀 Improvements (Next Steps)
+
+- Add Kubernetes **Service (ClusterIP)** for internal access
+- Connect to a **Node.js backend (3-tier architecture)**
+- Use **StatefulSet scaling + MySQL replication**
+- Add **Helm charts**
+- Deploy to cloud (AWS EKS, GKE, AKS)
 
 ---
 
 ## 🧩 Lessons Learned
 
-- Persistent storage is essential for databases in Kubernetes
-- PVCs retain data beyond pod lifecycle
-- Misconfigured storage can lead to data loss or initialization issues
-- Debugging involves logs, describe, and understanding container lifecycle
+- StatefulSets are essential for databases in Kubernetes
+- Persistent storage must align with application data paths
+- Secrets must be managed carefully
+- Storage state overrides environment variables after initialization
+- Debugging requires logs, describe, and understanding pod lifecycle
 
 ---
 
 ## 👨‍💻 Author
 
-**Emmanuel Fordjour Kumah**
+Emmanuel Fordjour
 
 ---
 
 ## 📜 License
 
-This project is open-source and available under the MIT License.
+MIT License
